@@ -1,0 +1,9 @@
+
+*.pyc
+*.txt
+*.model
+*.bin
+*.out
+/data
+/log
+run
