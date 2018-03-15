@@ -22,20 +22,20 @@ import torch.nn.functional as F
 import tensorboard
 import logging
 
-CUDA = False   # use gpu
-FEATURE = False
+CUDA = True   # use gpu
+FEATURE = True
 # Constants from C++ code
 WORD_DIM = 300
-EMBEDDING_DIM = 300 + 45 + 1 if FEATURE else 300
+EMBEDDING_DIM = 300 + 45 + 1 if  FEATURE else 300
 #+ 45 + 1  # cat word embedding | pos_tag_embedding | first_letter_capital_embedding
 LAYERS = 1
-INPUT_DIM = 300 if FEATURE else 300 + 45 + 1
-XCRIBE_DIM = 32
-SEG_DIM = 32
-H1DIM = 64
-H2DIM = 64
+INPUT_DIM = 300 # + 45 + 1 if FEATURE else 300
+XCRIBE_DIM = 128
+SEG_DIM = 128
+H1DIM = 128
+H2DIM = 128
 TAG_DIM = 32
-DURATION_DIM = 4
+DURATION_DIM = 32
 POS_TAG_DIM = 45
 
 FEATURE_DIM = POS_TAG_DIM + 1 if FEATURE else 0
@@ -43,14 +43,14 @@ FEATURE_DIM = POS_TAG_DIM + 1 if FEATURE else 0
 # lstm builder: LAYERS, XCRIBE_DIM, SEG_DIM, m?
 # (layers, input_dim, hidden_dim, model)
 
-DATA_MAX_SEG_LEN = 4
+DATA_MAX_SEG_LEN = 6
 
 MAX_SENTENCE_LEN = 32
 MINIBATCH_SIZE = 1
 BATCH_SIZE = 10000
 
 use_dropout = False
-dropout_rate = 0.5
+dropout_rate = 0.0
 ner_tagging = False
 use_max_sentence_len_training = False
 
@@ -86,7 +86,7 @@ class SegRNN(nn.Module):
 
         self.forward_initial = (nn.Parameter(torch.randn(1, 1, SEG_DIM)), nn.Parameter(torch.randn(1, 1, SEG_DIM)))
         self.backward_initial = (nn.Parameter(torch.randn(1, 1, SEG_DIM)), nn.Parameter(torch.randn(1, 1, SEG_DIM)))
-        self.Y_encoding = [nn.Parameter(torch.randn(1, 1, TAG_DIM)) for i in range(len(I_LABELS))]
+        self.Y_encoding = [nn.Parameter(torch.randn(1, 1, TAG_DIM)) for i in range(len(LABELS))]
         self.Z_encoding = [nn.Parameter(torch.randn(1, 1, DURATION_DIM)) for i in range(1, DATA_MAX_SEG_LEN + 1)]
 
         self.register_parameter("forward_initial_0", self.forward_initial[0])
@@ -111,6 +111,7 @@ class SegRNN(nn.Module):
         batch_data = FloatTensor(batch_data)
 
         sentence_data = batch_data[:, :, 0:WORD_DIM]
+        #print sentence_data.shape
         forward_precalc, backward_precalc = self._precalc(sentence_data)
 
 
@@ -118,10 +119,10 @@ class SegRNN(nn.Module):
         for i in range(1, N + 1):
             t_sum = []
             for j in range(max(0, i - DATA_MAX_SEG_LEN), i):
-                precalc_expand = torch.cat([forward_precalc[j][i - 1], backward_precalc[j][i - 1]], 2).repeat(len(I_LABELS), B, 1)
+                precalc_expand = torch.cat([forward_precalc[j][i - 1], backward_precalc[j][i - 1]], 2).repeat(len(LABELS), B, 1)
                 # print ([self.Y_encoding[y] for y in range(len(LABELS))])
-                y_encoding_expand = torch.cat([self.Y_encoding[y] for y in range(len(I_LABELS))], 0).repeat(1, B, 1)
-                z_encoding_expand = torch.cat([self.Z_encoding[i - j - 1] for y in range(len(I_LABELS))]).repeat(1, B, 1)
+                y_encoding_expand = torch.cat([self.Y_encoding[y] for y in range(len(LABELS))], 0).repeat(1, B, 1)
+                z_encoding_expand = torch.cat([self.Z_encoding[i - j - 1] for y in range(len(LABELS))]).repeat(1, B, 1)
 
                 if CUDA:
                     y_encoding_expand = y_encoding_expand.cuda()
@@ -139,7 +140,7 @@ class SegRNN(nn.Module):
                                 if batch_data[x, w][y] is 1:
                                     feature_data[0, w][y] = 1
 
-                    feature_encoding = Variable(feature_data).repeat(len(I_LABELS), B, 1)
+                    feature_encoding = Variable(feature_data).repeat(len(LABELS), B, 1)
 
                     # LABELS, MINIBATCH, FEATURES
                     seg_encoding = torch.cat([precalc_expand, y_encoding_expand, z_encoding_expand,feature_encoding\
@@ -171,7 +172,8 @@ class SegRNN(nn.Module):
                     continue
                 forward_val = forward_precalc[chars][chars + length - 1][:, batch_idx, np.newaxis, :]
                 backward_val = backward_precalc[chars][chars + length - 1][:, batch_idx, np.newaxis, :]
-                y_val = self.Y_encoding[I_LABELS.index('0' if tag is '0' else 'I')]
+                #y_val = self.Y_encoding[I_LABELS.index('0' if tag is '0' else 'I')]
+                y_val = self.Y_encoding[LABELS.index(tag)]
                 z_val = self.Z_encoding[length - 1]
                 '''
                 print 'length:', length
@@ -272,9 +274,9 @@ class SegRNN(nn.Module):
             max_t = float("-inf")
             max_label = -1
             for j in range(max(0, i - DATA_MAX_SEG_LEN), i):
-                precalc_expand = torch.cat([forward_precalc[j][i - 1], backward_precalc[j][i - 1]], 2).repeat(len(I_LABELS), B, 1)
-                y_encoding_expand = torch.cat([self.Y_encoding[y] for y in range(len(I_LABELS))], 0)
-                z_encoding_expand = torch.cat([self.Z_encoding[i - j - 1] for y in range(len(I_LABELS))])
+                precalc_expand = torch.cat([forward_precalc[j][i - 1], backward_precalc[j][i - 1]], 2).repeat(len(LABELS), B, 1)
+                y_encoding_expand = torch.cat([self.Y_encoding[y] for y in range(len(LABELS))], 0)
+                z_encoding_expand = torch.cat([self.Z_encoding[i - j - 1] for y in range(len(LABELS))])
                 #feature_data = torch.FloatTensor(data[i - 1, :, WORD_DIM:])
                 if FEATURE:
                     feature_data = FloatTensor(data[j, :, WORD_DIM:])
@@ -288,7 +290,7 @@ class SegRNN(nn.Module):
                                 if data[x, w][y] is 1:
                                     feature_data[0, w][y] = 1
 
-                    feature_encoding = Variable(feature_data).repeat(len(I_LABELS), 1, 1)
+                    feature_encoding = Variable(feature_data).repeat(len(LABELS), 1, 1)
 
                     seg_encoding = torch.cat([precalc_expand, y_encoding_expand, z_encoding_expand, feature_encoding\
                                       ], 2)
@@ -298,7 +300,7 @@ class SegRNN(nn.Module):
                 #print 'function inference, t_val:', t_val
                 t = t_val + log_alphas[j][2]
                 # print("t_val: ", t_val)
-                for y in range(len(I_LABELS)):
+                for y in range(len(LABELS)):
                     if t.data[y, 0, 0] > max_t:
                         max_t = t.data[y, 0, 0]
                         max_label = y
@@ -308,7 +310,7 @@ class SegRNN(nn.Module):
         cur_pos = N
         ret = []
         while cur_pos != 0:
-            ret.append((I_LABELS[log_alphas[cur_pos][0]], log_alphas[cur_pos][1]))
+            ret.append((LABELS[log_alphas[cur_pos][0]], log_alphas[cur_pos][1]))
             cur_pos -= log_alphas[cur_pos][1]
         return list(reversed(ret))
 
@@ -639,8 +641,8 @@ if __name__ == "__main__":
         max_prec = 0.0
         max_rec = 0.0
         max_iter = 0
-        for batch_num in range(10):
-            # random.shuffle(pairs)
+        for batch_num in range(5):
+            random.shuffle(pairs)
             start_time = time.time()
             for i in range(0, min(BATCH_SIZE, len(pairs)), MINIBATCH_SIZE):
 
@@ -666,13 +668,15 @@ if __name__ == "__main__":
                 sum_loss += loss.data[0]
                 count += 1.0 * batch_size
                 loss.backward()
-                board_logger.add_scalar_summary('loss', loss, iter_count)
+                if i % 50 == 0:
+                    board_logger.add_scalar_summary('loss', loss, iter_count)
                 optimizer.step()
-                for name, p in seg_rnn.named_parameters():
-                    if p.requires_grad and p.grad is not None:
-                        name = name.replace('.', '/')
-                        board_logger.add_histo_summary('value/'+ name, p, iter_count)
-                        board_logger.add_histo_summary('grad/' + name, p.grad, iter_count)
+                if i % 50 == 0:
+                    for name, p in seg_rnn.named_parameters():
+                        if p.requires_grad and p.grad is not None:
+                            name = name.replace('.', '/')
+                            board_logger.add_histo_summary('value/'+ name, p, iter_count)
+                            board_logger.add_histo_summary('grad/' + name, p.grad, iter_count)
                 if i % 100 == 0:
                     logging.info("Batch "+str(batch_num) + ", datapoint "
                                 + str(i) + ", avg loss " + str(sum_loss / count))
@@ -689,23 +693,26 @@ if __name__ == "__main__":
                 sum_pred += predict_tmp
                 sum_gold += gold_tmp
 
-                prec_tmp = correct_count_tmp/predict_tmp if predict_tmp > 0 else 0.0
-                rec_tmp = correct_count_tmp/gold_tmp if gold_tmp > 0 else 1.0
-                board_logger.add_scalar_summary('precision', prec_tmp, iter_count)
-                board_logger.add_scalar_summary('recall', rec_tmp, iter_count)
-                if prec_tmp > 0 and rec_tmp > 0:
-                    board_logger.add_scalar_summary('f1', 2.0*prec_tmp*rec_tmp/(prec_tmp+rec_tmp), iter_count)
 
                 cum_prec = correct_count / sum_pred if sum_pred != 0 else 0.0
                 cum_rec = correct_count / sum_gold if sum_gold != 0 else 0.0
+
+                if i % 100 == 0:
+                    prec_tmp = correct_count_tmp/predict_tmp if predict_tmp > 0 else 0.0
+                    rec_tmp = correct_count_tmp/gold_tmp if gold_tmp > 0 else 1.0
+                    board_logger.add_scalar_summary('precision', cum_prec, iter_count)
+                    board_logger.add_scalar_summary('recall', cum_rec, iter_count)
+                    if cum_prec > 0 and cum_rec > 0:
+                        board_logger.add_scalar_summary('f1', 2.0*cum_prec*cum_rec/(cum_prec+cum_rec), iter_count)
+                    sum_gold = 0.0
+                    sum_pred = 0.0
+                    correct_count = 0.0
+
+
                 if i % 1000 == 0 and cum_prec > 0 and cum_rec > 0:
                     cum_f1 = 2.0 / (1.0 / cum_prec + 1.0/cum_rec)
                     logging.info("F1:" + str(cum_f1) +
                                   ", precision:" + str(cum_prec)  + ", recall:" + str(cum_rec))
-
-                    correct_count = 0.0
-                    sum_gold = 0.0
-                    sum_pred = 0.0
                 # print(seg_rnn.Y_encoding[0], seg_rnn.Y_encoding[5])
                 # print(seg_rnn.Y_encoding[0].grad, seg_rnn.Y_encoding[5].grad)
                 #for param in seg_rnn.parameters():
