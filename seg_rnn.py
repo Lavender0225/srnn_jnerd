@@ -187,7 +187,7 @@ class SegRNN(nn.Module):
             return []
         #print("infer data.shape:", data.shape)
         forward_precalc, backward_precalc = self._precalc(data)
-        
+
         log_alphas = [(-1, -1, 0.0)]
         for i in range(1, N + 1):
             t_sum = []
